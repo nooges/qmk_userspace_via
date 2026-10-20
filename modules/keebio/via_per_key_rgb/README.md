@@ -35,5 +35,6 @@ It adds a "Direct" RGB matrix effect, answers VIA's per-key commands on custom c
 - Adding the module moves the dynamic keymap in EEPROM, so VIA settings reset on update.
 - Colors default to red on first boot and after `EE_CLR`.
 - Each LED also stores a brightness (0 = off, custom value ID 3), scaled by the global brightness. Painting a color resets it to full, so stock VIA can still turn an LED back on. Turning LEDs off from the painter needs keebio/via-app (the "Off" swatch).
-- Storage is 3 bytes per LED (204 bytes on a 68-LED board).
+- Lighting layers (`VIA_PER_KEY_LAYERS`, default 4): layer 0 is the base paint, and each higher layer overlays it while that keymap layer is active. Keys painted transparent on a layer show the next active layer below, like `KC_TRNS`. Stock VIA only edits layer 0; keebio/via-app has layer tabs and a "Transparent" brush. Split boards get `SPLIT_LAYER_STATE_ENABLE` so the slave half follows the layer.
+- Storage is `VIA_PER_KEY_LAYERS × (3 bytes per LED + 1 bit per LED)`: 852 bytes for 4 layers on a 68-LED board. STM32 boards using the default 1 KB of emulated EEPROM need more (e.g. `#define WEAR_LEVELING_BACKING_SIZE 4096` in the keymap's `config.h`, as Iris LM does) or fewer layers.
 - Bump `EECONFIG_MODULE_VIA_PER_KEY_RGB_DATA_VERSION` in `config.h` if the stored layout changes.

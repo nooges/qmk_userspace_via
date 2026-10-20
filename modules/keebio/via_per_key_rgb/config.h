@@ -1,9 +1,20 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
 
-// Per-LED hue/sat, then per-LED brightness. Bump the version if the layout of this block changes.
-#define EECONFIG_MODULE_VIA_PER_KEY_RGB_DATA_SIZE (RGB_MATRIX_LED_COUNT * 3)
-#define EECONFIG_MODULE_VIA_PER_KEY_RGB_DATA_VERSION 2
+// Lighting layers: layer 0 is the base paint, higher layers overlay it while active
+#ifndef VIA_PER_KEY_LAYERS
+#    define VIA_PER_KEY_LAYERS 4
+#endif
+
+// Per layer: hue/sat and brightness per LED, plus a transparent bit per LED.
+// Bump the version if the layout of this block changes.
+#define EECONFIG_MODULE_VIA_PER_KEY_RGB_DATA_SIZE (VIA_PER_KEY_LAYERS * (RGB_MATRIX_LED_COUNT * 3 + (RGB_MATRIX_LED_COUNT + 7) / 8))
+#define EECONFIG_MODULE_VIA_PER_KEY_RGB_DATA_VERSION 3
+
+// The slave half renders layer overlays too, so it needs the active layers
+#ifndef SPLIT_LAYER_STATE_ENABLE
+#    define SPLIT_LAYER_STATE_ENABLE
+#endif
 
 // Split RPC used to mirror the per-key buffer to the slave half
 #define SPLIT_TRANSACTION_IDS_MODULE_VIA_PER_KEY_RGB PUT_VIA_PER_KEY_RGB
