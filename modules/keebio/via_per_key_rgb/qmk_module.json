@@ -1,0 +1,8 @@
+{
+    "module_name": "VIA Per-Key RGB",
+    "maintainer": "Keebio",
+    "license": "GPL-2.0-or-later",
+    "features": {
+        "rgb_matrix": true
+    }
+}
