@@ -21,8 +21,13 @@
 // effect uses, per LED, the highest active layer where that LED isn't transparent.
 //   id_custom_set_value  [0x07, 0, 4, layer, led_index, count, hue, sat, val, transparent, ...]
 //   id_custom_get_value  [0x08, 0, 4, layer, led_index, count]  -> 4 bytes per LED at data[6..]
-//   id_custom_get_value  [0x08, 0, 5]  -> number of lighting layers at data[3]
+//   id_custom_get_value  [0x08, 0, 5]  -> lighting layers at data[3], indicators at data[4]
 // Layer 0 ignores the transparent byte.
+//
+// Indicator overlays follow the lighting layers (value ID 4 layer index
+// VIA_PER_KEY_LAYERS + n) for Caps Lock, Num Lock, Scroll Lock and Caps Word. While a
+// state is on, its non-transparent LEDs are drawn over whatever effect is running;
+// later indicators win where they overlap.
 //
 // Saves are debounced to spare flash, and on split boards the buffers are pushed
 // to the slave half over a split RPC, since VIA only talks to the master.
@@ -36,8 +41,12 @@
 #include <string.h>
 #include "via.h"
 #include "community_modules.h"
+#include <lib/lib8tion/lib8tion.h>
 
 ASSERT_COMMUNITY_MODULES_MIN_API_VERSION(1, 1, 3);
+
+// Defined (weak) in rgb_matrix.c but not declared in its header
+rgb_t rgb_matrix_hsv_to_rgb(hsv_t hsv);
 
 #ifdef SPLIT_KEYBOARD
 #    include "transactions.h"
@@ -61,10 +70,16 @@ ASSERT_COMMUNITY_MODULES_MIN_API_VERSION(1, 1, 3);
 #define PKR_LAYERS VIA_PER_KEY_LAYERS
 #define PKR_MASK_BYTES ((RGB_MATRIX_LED_COUNT + 7) / 8)
 
+enum { PKR_IND_CAPS_LOCK, PKR_IND_NUM_LOCK, PKR_IND_SCROLL_LOCK, PKR_IND_CAPS_WORD, PKR_INDICATORS };
+#define PKR_OVERLAYS (PKR_LAYERS + PKR_INDICATORS)
+
 // Read by the effect in rgb_matrix_module.inc
-uint8_t        pkr_hs[PKR_LAYERS][RGB_MATRIX_LED_COUNT][2];
-uint8_t        pkr_v[PKR_LAYERS][RGB_MATRIX_LED_COUNT];
-static uint8_t pkr_transparent[PKR_LAYERS][PKR_MASK_BYTES]; // bit set = show the layer below
+uint8_t        pkr_hs[PKR_OVERLAYS][RGB_MATRIX_LED_COUNT][2];
+uint8_t        pkr_v[PKR_OVERLAYS][RGB_MATRIX_LED_COUNT];
+static uint8_t pkr_transparent[PKR_OVERLAYS][PKR_MASK_BYTES]; // bit set = show the layer below
+
+// Bit per indicator that's on. The master reads it locally and sends it to the slave.
+static uint8_t pkr_indicator_state = 0;
 
 _Static_assert(RGB_MATRIX_LED_COUNT <= 255, "VIA per-key protocol uses an 8-bit LED index");
 _Static_assert(PKR_LAYERS >= 1 && PKR_LAYERS <= MAX_LAYER, "VIA_PER_KEY_LAYERS out of range");
@@ -87,6 +102,15 @@ static void pkr_set_transparent(uint8_t layer, uint8_t led, bool transparent) {
     }
 }
 
+static uint8_t pkr_local_indicator_state(void) {
+    led_t   leds  = host_keyboard_led_state();
+    uint8_t state = (leds.caps_lock << PKR_IND_CAPS_LOCK) | (leds.num_lock << PKR_IND_NUM_LOCK) | (leds.scroll_lock << PKR_IND_SCROLL_LOCK);
+#ifdef CAPS_WORD_ENABLE
+    state |= is_caps_word_on() << PKR_IND_CAPS_WORD;
+#endif
+    return state;
+}
+
 // Highest active layer where this LED isn't transparent
 uint8_t pkr_layer_for(uint8_t led, layer_state_t state) {
     for (uint8_t layer = PKR_LAYERS - 1; layer > 0; layer--) {
@@ -96,15 +120,19 @@ uint8_t pkr_layer_for(uint8_t led, layer_state_t state) {
 }
 
 #ifdef SPLIT_KEYBOARD
-// [layer, start, count, h0, s0, v0, t0, h1, ...] must fit in one RPC packet
+// [layer, start, count, h0, s0, v0, t0, h1, ...] must fit in one RPC packet.
+// Indicator state goes as [PKR_STATE_PACKET, state].
+#    define PKR_STATE_PACKET 0xFF
 #    define PKR_CHUNK_LEDS ((RPC_M2S_BUFFER_SIZE - 3) / 4)
 #    define PKR_CHUNKS_PER_LAYER ((RGB_MATRIX_LED_COUNT + PKR_CHUNK_LEDS - 1) / PKR_CHUNK_LEDS)
-#    define PKR_CHUNKS (PKR_LAYERS * PKR_CHUNKS_PER_LAYER)
+#    define PKR_CHUNKS (PKR_OVERLAYS * PKR_CHUNKS_PER_LAYER)
+_Static_assert(PKR_OVERLAYS < PKR_STATE_PACKET, "Too many overlays for the sync packet");
 
 static uint8_t  pkr_dirty[(PKR_CHUNKS + 7) / 8];
 static uint16_t pkr_refresh_chunk = 0;
 static uint8_t  pkr_idle_ticks    = 0;
 static uint32_t pkr_sync_timer    = 0;
+static uint16_t pkr_sent_state    = 0xFFFF; // never sent
 
 static void pkr_mark_dirty(uint8_t layer, uint8_t start, uint8_t count) {
     for (uint8_t i = start; i < start + count; i++) {
@@ -133,9 +161,13 @@ static bool pkr_send_chunk(uint16_t chunk) {
 
 static void pkr_slave_handler(uint8_t in_len, const void *in_data, uint8_t out_len, void *out_data) {
     const uint8_t *d = (const uint8_t *)in_data;
+    if (in_len >= 2 && d[0] == PKR_STATE_PACKET) {
+        pkr_indicator_state = d[1];
+        return;
+    }
     if (in_len < 3) return;
     uint8_t layer = d[0], start = d[1], count = d[2];
-    if (layer >= PKR_LAYERS || start + count > RGB_MATRIX_LED_COUNT || in_len < 3 + count * 4) return;
+    if (layer >= PKR_OVERLAYS || start + count > RGB_MATRIX_LED_COUNT || in_len < 3 + count * 4) return;
     for (uint8_t i = 0; i < count; i++) {
         const uint8_t *p            = &d[3 + i * 4];
         pkr_hs[layer][start + i][0] = p[0];
@@ -160,9 +192,9 @@ static void pkr_write(void) {
     eeconfig_update_via_per_key_rgb_datablock(pkr_transparent, sizeof(pkr_hs) + sizeof(pkr_v), sizeof(pkr_transparent));
 }
 
-// Fresh/cleared EEPROM: base layer red at full brightness, higher layers transparent
+// Fresh/cleared EEPROM: base layer red at full brightness, every overlay transparent
 void eeconfig_init_via_per_key_rgb_datablock(void) {
-    for (uint8_t layer = 0; layer < PKR_LAYERS; layer++) {
+    for (uint8_t layer = 0; layer < PKR_OVERLAYS; layer++) {
         for (uint8_t i = 0; i < RGB_MATRIX_LED_COUNT; i++) {
             pkr_hs[layer][i][0] = 0;   // hue: red
             pkr_hs[layer][i][1] = 255; // sat
@@ -188,10 +220,20 @@ void housekeeping_task_via_per_key_rgb(void) {
         pkr_write();
     }
 
+    if (is_keyboard_master()) {
+        pkr_indicator_state = pkr_local_indicator_state();
+    }
+
 #ifdef SPLIT_KEYBOARD
     if (!is_keyboard_master() || !is_transport_connected()) return;
     if (timer_elapsed32(pkr_sync_timer) < 10) return;
     pkr_sync_timer = timer_read32();
+
+    if (pkr_sent_state != pkr_indicator_state) {
+        uint8_t buf[2] = {PKR_STATE_PACKET, pkr_indicator_state};
+        if (transaction_rpc_send(PUT_VIA_PER_KEY_RGB, sizeof(buf), buf)) pkr_sent_state = pkr_indicator_state;
+        return;
+    }
 
     for (uint16_t chunk = 0; chunk < PKR_CHUNKS; chunk++) {
         if (pkr_dirty[chunk / 8] & (1 << (chunk % 8))) {
@@ -205,8 +247,25 @@ void housekeeping_task_via_per_key_rgb(void) {
         pkr_idle_ticks = 0;
         pkr_send_chunk(pkr_refresh_chunk);
         pkr_refresh_chunk = (pkr_refresh_chunk + 1) % PKR_CHUNKS;
+        if (pkr_refresh_chunk == 0) pkr_sent_state = 0xFFFF; // resend state each pass too
     }
 #endif
+}
+
+bool rgb_matrix_indicators_advanced_via_per_key_rgb(uint8_t led_min, uint8_t led_max) {
+    if (!pkr_indicator_state) return true;
+    uint8_t val = rgb_matrix_get_val();
+    for (uint8_t ind = 0; ind < PKR_INDICATORS; ind++) {
+        if (!(pkr_indicator_state & (1 << ind))) continue;
+        uint8_t overlay = PKR_LAYERS + ind;
+        for (uint8_t i = led_min; i < led_max; i++) {
+            if (pkr_is_transparent(overlay, i)) continue;
+            hsv_t hsv = {pkr_hs[overlay][i][0], pkr_hs[overlay][i][1], scale8(val, pkr_v[overlay][i])};
+            rgb_t rgb = rgb_matrix_hsv_to_rgb(hsv);
+            rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
+        }
+    }
+    return true;
 }
 
 static void pkr_underglow_command(uint8_t *data, uint8_t length) {
@@ -236,7 +295,7 @@ static void pkr_layered_command(uint8_t *data, uint8_t length) {
     uint8_t  layer      = data[3];
     uint8_t  start      = data[4];
     uint8_t  count      = data[5];
-    if (layer >= PKR_LAYERS || start + count > RGB_MATRIX_LED_COUNT || 6 + count * 4 > length) {
+    if (layer >= PKR_OVERLAYS || start + count > RGB_MATRIX_LED_COUNT || 6 + count * 4 > length) {
         *command_id = id_unhandled;
         return;
     }
@@ -291,6 +350,7 @@ void via_custom_value_command_kb(uint8_t *data, uint8_t length) {
         case PKR_LAYER_COUNT_VALUE_ID:
             if (*command_id == id_custom_get_value) {
                 data[3] = PKR_LAYERS;
+                data[4] = PKR_INDICATORS;
             } else {
                 *command_id = id_unhandled;
             }

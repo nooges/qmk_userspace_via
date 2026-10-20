@@ -6,10 +6,11 @@
 #    define VIA_PER_KEY_LAYERS 4
 #endif
 
-// Per layer: hue/sat and brightness per LED, plus a transparent bit per LED.
+// Per lighting layer and per indicator overlay (Caps/Num/Scroll Lock, Caps Word):
+// hue/sat and brightness per LED, plus a transparent bit per LED.
 // Bump the version if the layout of this block changes.
-#define EECONFIG_MODULE_VIA_PER_KEY_RGB_DATA_SIZE (VIA_PER_KEY_LAYERS * (RGB_MATRIX_LED_COUNT * 3 + (RGB_MATRIX_LED_COUNT + 7) / 8))
-#define EECONFIG_MODULE_VIA_PER_KEY_RGB_DATA_VERSION 3
+#define EECONFIG_MODULE_VIA_PER_KEY_RGB_DATA_SIZE ((VIA_PER_KEY_LAYERS + 4) * (RGB_MATRIX_LED_COUNT * 3 + (RGB_MATRIX_LED_COUNT + 7) / 8))
+#define EECONFIG_MODULE_VIA_PER_KEY_RGB_DATA_VERSION 4
 
 // The slave half renders layer overlays too, so it needs the active layers
 #ifndef SPLIT_LAYER_STATE_ENABLE

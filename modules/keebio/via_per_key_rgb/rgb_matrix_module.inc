@@ -3,8 +3,9 @@
 RGB_MATRIX_EFFECT(PER_KEY_VIA)
 
 #ifdef RGB_MATRIX_CUSTOM_EFFECT_IMPLS
-extern uint8_t pkr_hs[VIA_PER_KEY_LAYERS][RGB_MATRIX_LED_COUNT][2];
-extern uint8_t pkr_v[VIA_PER_KEY_LAYERS][RGB_MATRIX_LED_COUNT];
+// Lighting layers, then indicator overlays; the effect only reads the layers
+extern uint8_t pkr_hs[][RGB_MATRIX_LED_COUNT][2];
+extern uint8_t pkr_v[][RGB_MATRIX_LED_COUNT];
 uint8_t        pkr_layer_for(uint8_t led, layer_state_t state);
 
 static bool PER_KEY_VIA(effect_params_t *params) {

@@ -3,6 +3,7 @@
     "maintainer": "Keebio",
     "license": "GPL-2.0-or-later",
     "features": {
-        "rgb_matrix": true
+        "rgb_matrix": true,
+        "caps_word": true
     }
 }
