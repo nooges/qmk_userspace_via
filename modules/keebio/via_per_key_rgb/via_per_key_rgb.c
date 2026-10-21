@@ -45,6 +45,10 @@
 
 ASSERT_COMMUNITY_MODULES_MIN_API_VERSION(1, 1, 3);
 
+// Does nothing on boards without RGB matrix, so a VIA keymap shared with an RGB
+// light revision still builds
+#ifdef RGB_MATRIX_ENABLE
+
 // Defined (weak) in rgb_matrix.c but not declared in its header
 rgb_t rgb_matrix_hsv_to_rgb(hsv_t hsv);
 
@@ -399,3 +403,5 @@ void via_custom_value_command_kb(uint8_t *data, uint8_t length) {
             break;
     }
 }
+
+#endif // RGB_MATRIX_ENABLE

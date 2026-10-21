@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
 
+// Boards without RGB matrix (e.g. an RGB light revision sharing the VIA keymap)
+// build without the module's storage and sync
+#ifdef RGB_MATRIX_ENABLE
+
 // Lighting layers: layer 0 is the base paint, higher layers overlay it while active
 #ifndef VIA_PER_KEY_LAYERS
 #    define VIA_PER_KEY_LAYERS 4
@@ -26,3 +30,5 @@
 #ifndef VIA_FIRMWARE_VERSION
 #    define VIA_FIRMWARE_VERSION 2
 #endif
+
+#endif // RGB_MATRIX_ENABLE
