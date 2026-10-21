@@ -21,7 +21,8 @@
 #define SPLIT_TRANSACTION_IDS_MODULE_VIA_PER_KEY_RGB PUT_VIA_PER_KEY_RGB
 
 // Reported to VIA as id_firmware_version. The VIA definition only shows (and reads)
-// the per-key controls at this version or later, so it still works on older firmware.
+// controls the firmware supports, so it still works on older firmware:
+//   1 = per-key colors, 2 = lighting layers and indicator overlays
 #ifndef VIA_FIRMWARE_VERSION
-#    define VIA_FIRMWARE_VERSION 1
+#    define VIA_FIRMWARE_VERSION 2
 #endif

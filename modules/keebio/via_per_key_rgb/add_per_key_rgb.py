@@ -41,6 +41,12 @@ NO_COLOR_EFFECTS = [24, 28, 29, 32]  # same exclusions VIA's built-in menu uses
 
 # VIA_FIRMWARE_VERSION set by the module's config.h; older firmware gets the stock controls
 PER_KEY_FIRMWARE_VERSION = 1
+# Firmware with lighting layers and indicator overlays (value ID 5)
+INDICATOR_FIRMWARE_VERSION = 2
+
+# The painter in indicators-only mode, for effects other than Direct.
+# keebio/via-app keys off this ID; value ID 5 (overlay counts) is a harmless read.
+INDICATOR_CONTROL_ID = "id_via_per_key_indicators"
 
 
 def effect_controls(options, no_color_ids, no_speed_ids):
@@ -91,6 +97,11 @@ def build_menu(direct_id, has_underglow):
                 {"showIf": f"{fw} < {PER_KEY_FIRMWARE_VERSION}",
                  "content": effect_controls(stock, NO_COLOR_EFFECTS, [])},
                 {"showIf": f"{fw} >= {PER_KEY_FIRMWARE_VERSION}", "content": per_key},
+                # Groups can't nest, so this sits beside the per-key group
+                {"showIf": f"{fw} >= {INDICATOR_FIRMWARE_VERSION}", "content": [
+                    {"showIf": f"{e} != {direct_id}", "label": "Status Indicators",
+                     "type": "color-palette", "content": [INDICATOR_CONTROL_ID, 0, 5]},
+                ]},
             ],
         }],
     }
