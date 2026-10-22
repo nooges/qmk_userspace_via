@@ -21,7 +21,10 @@
 // effect uses, per LED, the highest active layer where that LED isn't transparent.
 //   id_custom_set_value  [0x07, 0, 4, layer, led_index, count, hue, sat, val, transparent, ...]
 //   id_custom_get_value  [0x08, 0, 4, layer, led_index, count]  -> 4 bytes per LED at data[6..]
-//   id_custom_get_value  [0x08, 0, 5]  -> lighting layers at data[3], indicators at data[4]
+//   id_custom_get_value  [0x08, 0, 5]  -> lighting layers at data[3], indicators at data[4],
+//                                          LED count at data[5]
+//   id_custom_get_value  [0x08, 0, 6, led_index, count]  -> LED flags (LED_FLAG_*) at data[5..],
+//                                          so VIA can find underglow LEDs to paint per layer
 // Layer 0 ignores the transparent byte.
 //
 // Indicator overlays follow the lighting layers (value ID 4 layer index
@@ -70,6 +73,7 @@ rgb_t rgb_matrix_hsv_to_rgb(hsv_t hsv);
 #define PKR_BRIGHTNESS_VALUE_ID 3
 #define PKR_LAYERED_VALUE_ID 4
 #define PKR_LAYER_COUNT_VALUE_ID 5
+#define PKR_LED_FLAGS_VALUE_ID 6
 
 #define PKR_LAYERS VIA_PER_KEY_LAYERS
 #define PKR_MASK_BYTES ((RGB_MATRIX_LED_COUNT + 7) / 8)
@@ -355,10 +359,22 @@ void via_custom_value_command_kb(uint8_t *data, uint8_t length) {
             if (*command_id == id_custom_get_value) {
                 data[3] = PKR_LAYERS;
                 data[4] = PKR_INDICATORS;
+                data[5] = RGB_MATRIX_LED_COUNT;
             } else {
                 *command_id = id_unhandled;
             }
             return;
+        case PKR_LED_FLAGS_VALUE_ID: {
+            uint8_t start = data[3], count = data[4];
+            if (*command_id != id_custom_get_value || start + count > RGB_MATRIX_LED_COUNT || 5 + count > length) {
+                *command_id = id_unhandled;
+                return;
+            }
+            for (uint8_t i = 0; i < count; i++) {
+                data[5 + i] = g_led_config.flags[start + i];
+            }
+            return;
+        }
     }
 
     uint8_t start = data[3];
