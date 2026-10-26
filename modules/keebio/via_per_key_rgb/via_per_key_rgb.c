@@ -27,6 +27,15 @@
 //                                          so VIA can find underglow LEDs to paint per layer
 // Layer 0 ignores the transparent byte.
 //
+// RGB sleep timer: lighting turns off after this many minutes without input
+// (0 = never). Stored in ms; RGB_MATRIX_TIMEOUT is the default, and post_config.h
+// points QMK's timeout check at the stored value. VIA shows a preset dropdown plus
+// a slider for other values:
+//   id_custom_set_value  [0x07, 0, 7, minutes]  -> preset; PKR_SLEEP_CUSTOM leaves it as is
+//   id_custom_get_value  [0x08, 0, 7]  -> minutes at data[3] if a preset, else PKR_SLEEP_CUSTOM
+//   id_custom_set_value  [0x07, 0, 8, minutes_hi, minutes_lo]  -> any value up to PKR_SLEEP_MAX
+//   id_custom_get_value  [0x08, 0, 8]  -> minutes at data[3..4] (big-endian), rounded up
+//
 // Indicator overlays follow the lighting layers (value ID 4 layer index
 // VIA_PER_KEY_LAYERS + n) for Caps Lock, Num Lock, Scroll Lock and Caps Word. While a
 // state is on, its non-transparent LEDs are drawn over whatever effect is running;
@@ -74,6 +83,14 @@ rgb_t rgb_matrix_hsv_to_rgb(hsv_t hsv);
 #define PKR_LAYERED_VALUE_ID 4
 #define PKR_LAYER_COUNT_VALUE_ID 5
 #define PKR_LED_FLAGS_VALUE_ID 6
+#define PKR_SLEEP_VALUE_ID 7
+#define PKR_SLEEP_CUSTOM_VALUE_ID 8
+
+// Must match the dropdown options in add_per_key_rgb.py
+static const uint8_t pkr_sleep_presets[] = {0, 5, 10, 15, 30, 60, 120};
+#define PKR_SLEEP_CUSTOM 255
+// Custom slider max; VIA sends ranges above 255 as 16-bit big-endian
+#define PKR_SLEEP_MAX 1440
 
 #define PKR_LAYERS VIA_PER_KEY_LAYERS
 #define PKR_MASK_BYTES ((RGB_MATRIX_LED_COUNT + 7) / 8)
@@ -86,12 +103,15 @@ uint8_t        pkr_hs[PKR_OVERLAYS][RGB_MATRIX_LED_COUNT][2];
 uint8_t        pkr_v[PKR_OVERLAYS][RGB_MATRIX_LED_COUNT];
 static uint8_t pkr_transparent[PKR_OVERLAYS][PKR_MASK_BYTES]; // bit set = show the layer below
 
+// Read by QMK's timeout check through RGB_MATRIX_TIMEOUT (see post_config.h)
+uint32_t pkr_timeout_ms = 0;
+
 // Bit per indicator that's on. The master reads it locally and sends it to the slave.
 static uint8_t pkr_indicator_state = 0;
 
 _Static_assert(RGB_MATRIX_LED_COUNT <= 255, "VIA per-key protocol uses an 8-bit LED index");
 _Static_assert(PKR_LAYERS >= 1 && PKR_LAYERS <= MAX_LAYER, "VIA_PER_KEY_LAYERS out of range");
-_Static_assert(EECONFIG_MODULE_VIA_PER_KEY_RGB_DATA_SIZE >= sizeof(pkr_hs) + sizeof(pkr_v) + sizeof(pkr_transparent), "EECONFIG_MODULE_VIA_PER_KEY_RGB_DATA_SIZE too small");
+_Static_assert(EECONFIG_MODULE_VIA_PER_KEY_RGB_DATA_SIZE >= sizeof(pkr_hs) + sizeof(pkr_v) + sizeof(pkr_transparent) + sizeof(pkr_timeout_ms), "EECONFIG_MODULE_VIA_PER_KEY_RGB_DATA_SIZE too small");
 _Static_assert(RGB_MATRIX_COMMUNITY_MODULE_PER_KEY_VIA == VIA_PER_KEY_EFFECT_ID,
                "Direct effect ID differs from VIA_PER_KEY_EFFECT_ID; set it in the keymap's config.h and use the same --direct-id for the VIA definition");
 
@@ -129,7 +149,7 @@ uint8_t pkr_layer_for(uint8_t led, layer_state_t state) {
 
 #ifdef SPLIT_KEYBOARD
 // [layer, start, count, h0, s0, v0, t0, h1, ...] must fit in one RPC packet.
-// Indicator state goes as [PKR_STATE_PACKET, state].
+// Indicator state and timeout go as [PKR_STATE_PACKET, state, timeout_ms (4 bytes)].
 #    define PKR_STATE_PACKET 0xFF
 #    define PKR_CHUNK_LEDS ((RPC_M2S_BUFFER_SIZE - 3) / 4)
 #    define PKR_CHUNKS_PER_LAYER ((RGB_MATRIX_LED_COUNT + PKR_CHUNK_LEDS - 1) / PKR_CHUNK_LEDS)
@@ -141,6 +161,7 @@ static uint16_t pkr_refresh_chunk = 0;
 static uint8_t  pkr_idle_ticks    = 0;
 static uint32_t pkr_sync_timer    = 0;
 static uint16_t pkr_sent_state    = 0xFFFF; // never sent
+static uint32_t pkr_sent_timeout  = 0;
 
 static void pkr_mark_dirty(uint8_t layer, uint8_t start, uint8_t count) {
     for (uint8_t i = start; i < start + count; i++) {
@@ -169,8 +190,9 @@ static bool pkr_send_chunk(uint16_t chunk) {
 
 static void pkr_slave_handler(uint8_t in_len, const void *in_data, uint8_t out_len, void *out_data) {
     const uint8_t *d = (const uint8_t *)in_data;
-    if (in_len >= 2 && d[0] == PKR_STATE_PACKET) {
+    if (in_len >= 6 && d[0] == PKR_STATE_PACKET) {
         pkr_indicator_state = d[1];
+        memcpy(&pkr_timeout_ms, &d[2], sizeof(pkr_timeout_ms));
         return;
     }
     if (in_len < 3) return;
@@ -192,15 +214,18 @@ static void pkr_read(void) {
     eeconfig_read_via_per_key_rgb_datablock(pkr_hs, 0, sizeof(pkr_hs));
     eeconfig_read_via_per_key_rgb_datablock(pkr_v, sizeof(pkr_hs), sizeof(pkr_v));
     eeconfig_read_via_per_key_rgb_datablock(pkr_transparent, sizeof(pkr_hs) + sizeof(pkr_v), sizeof(pkr_transparent));
+    eeconfig_read_via_per_key_rgb_datablock(&pkr_timeout_ms, sizeof(pkr_hs) + sizeof(pkr_v) + sizeof(pkr_transparent), sizeof(pkr_timeout_ms));
 }
 
 static void pkr_write(void) {
     eeconfig_update_via_per_key_rgb_datablock(pkr_hs, 0, sizeof(pkr_hs));
     eeconfig_update_via_per_key_rgb_datablock(pkr_v, sizeof(pkr_hs), sizeof(pkr_v));
     eeconfig_update_via_per_key_rgb_datablock(pkr_transparent, sizeof(pkr_hs) + sizeof(pkr_v), sizeof(pkr_transparent));
+    eeconfig_update_via_per_key_rgb_datablock(&pkr_timeout_ms, sizeof(pkr_hs) + sizeof(pkr_v) + sizeof(pkr_transparent), sizeof(pkr_timeout_ms));
 }
 
-// Fresh/cleared EEPROM: base layer red at full brightness, every overlay transparent
+// Fresh/cleared EEPROM: base layer red at full brightness, every overlay transparent,
+// timeout from RGB_MATRIX_TIMEOUT
 void eeconfig_init_via_per_key_rgb_datablock(void) {
     for (uint8_t layer = 0; layer < PKR_OVERLAYS; layer++) {
         for (uint8_t i = 0; i < RGB_MATRIX_LED_COUNT; i++) {
@@ -211,6 +236,7 @@ void eeconfig_init_via_per_key_rgb_datablock(void) {
         memset(pkr_transparent[layer], layer > 0 ? 0xFF : 0, PKR_MASK_BYTES);
         pkr_mark_dirty(layer, 0, RGB_MATRIX_LED_COUNT);
     }
+    pkr_timeout_ms = (uint32_t)VIA_PER_KEY_TIMEOUT_DEFAULT_S * 1000;
     pkr_write();
 }
 
@@ -237,9 +263,13 @@ void housekeeping_task_via_per_key_rgb(void) {
     if (timer_elapsed32(pkr_sync_timer) < 10) return;
     pkr_sync_timer = timer_read32();
 
-    if (pkr_sent_state != pkr_indicator_state) {
-        uint8_t buf[2] = {PKR_STATE_PACKET, pkr_indicator_state};
-        if (transaction_rpc_send(PUT_VIA_PER_KEY_RGB, sizeof(buf), buf)) pkr_sent_state = pkr_indicator_state;
+    if (pkr_sent_state != pkr_indicator_state || pkr_sent_timeout != pkr_timeout_ms) {
+        uint8_t buf[6] = {PKR_STATE_PACKET, pkr_indicator_state};
+        memcpy(&buf[2], &pkr_timeout_ms, sizeof(pkr_timeout_ms));
+        if (transaction_rpc_send(PUT_VIA_PER_KEY_RGB, sizeof(buf), buf)) {
+            pkr_sent_state   = pkr_indicator_state;
+            pkr_sent_timeout = pkr_timeout_ms;
+        }
         return;
     }
 
@@ -331,6 +361,35 @@ static void pkr_layered_command(uint8_t *data, uint8_t length) {
     if (*command_id == id_custom_set_value) pkr_mark_dirty(layer, start, count);
 }
 
+static void pkr_sleep_command(uint8_t *data) {
+    uint8_t *command_id = &data[0];
+    bool     dropdown   = data[2] == PKR_SLEEP_VALUE_ID;
+    if (*command_id == id_custom_set_value) {
+        if (dropdown && data[3] == PKR_SLEEP_CUSTOM) return; // keep the value; VIA shows the slider
+        uint16_t minutes = dropdown ? data[3] : MIN((data[3] << 8) | data[4], PKR_SLEEP_MAX);
+        pkr_timeout_ms   = (uint32_t)minutes * 60000;
+        // Restart the countdown (and wake the lighting) as if a key was pressed;
+        // VIA traffic doesn't count as input activity
+        set_activity_timestamps(sync_timer_read32(), last_encoder_activity_time(), last_pointing_device_activity_time());
+        // Don't rely on VIA sending id_custom_save after these controls
+        pkr_save_pending = true;
+        pkr_save_timer   = timer_read32();
+    } else if (*command_id == id_custom_get_value) {
+        uint16_t minutes = MIN((pkr_timeout_ms + 59999) / 60000, PKR_SLEEP_MAX);
+        if (!dropdown) {
+            data[3] = minutes >> 8;
+            data[4] = minutes & 0xFF;
+            return;
+        }
+        data[3] = PKR_SLEEP_CUSTOM;
+        for (uint8_t i = 0; i < ARRAY_SIZE(pkr_sleep_presets); i++) {
+            if (pkr_sleep_presets[i] == minutes) data[3] = minutes;
+        }
+    } else {
+        *command_id = id_unhandled;
+    }
+}
+
 void via_custom_value_command_kb(uint8_t *data, uint8_t length) {
     uint8_t *command_id = &data[0];
     uint8_t  channel_id = data[1];
@@ -363,6 +422,10 @@ void via_custom_value_command_kb(uint8_t *data, uint8_t length) {
             } else {
                 *command_id = id_unhandled;
             }
+            return;
+        case PKR_SLEEP_VALUE_ID:
+        case PKR_SLEEP_CUSTOM_VALUE_ID:
+            pkr_sleep_command(data);
             return;
         case PKR_LED_FLAGS_VALUE_ID: {
             uint8_t start = data[3], count = data[4];

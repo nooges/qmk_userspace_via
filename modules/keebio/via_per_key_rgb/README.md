@@ -12,13 +12,14 @@ QMK community module that lets VIA paint per-key lighting on RGB matrix boards: 
 | **Lighting layers**: each keymap layer can overlay the base paint while it's active; unpainted keys are transparent and show the layer below, like `KC_TRNS` | | ✓ (painter follows VIA's layer selector; Transparent brush) |
 | **Underglow**: LEDs without a key | base-layer color only ("Underglow Color" control) | color, brightness, Off and Transparent per layer and indicator ("Underglow" row in the painter) |
 | **Status indicators**: Caps Lock, Num Lock, Scroll Lock and Caps Word each have a paintable overlay, drawn over **any** effect while the state is on | | ✓ (indicator buttons in the Direct painter; "Status Indicators" painter for other effects) |
+| **RGB sleep timer**: turns lighting off after N minutes without input; "RGB Sleep Timer" dropdown with Never, 5–120 mins, or Custom (a 1–1440 minute slider; keebio/via-app can also show a number box beside it); stored as `RGB_MATRIX_TIMEOUT`'s ms | ✓ | ✓ |
 | **Lighting export/import**: lighting settings and every painted layer and indicator, as a `.lighting.json` file separate from the keymap | | ✓ (Save + Load pane) |
 
 Also:
 
 - **Persistence**: everything is saved to the module's own EEPROM datablock. Saves are debounced (1.5 s after the last change) so painting doesn't wear out emulated EEPROM.
-- **Split boards**: the master mirrors all lighting data and indicator state to the slave half, since VIA only talks to the master and QMK doesn't sync Caps Word. The module turns on `SPLIT_LAYER_STATE_ENABLE` so the slave follows the active layer.
-- **Defaults**: the base layer starts red at full brightness; every other layer and indicator starts transparent. These defaults are restored after `EE_CLR` or a storage version change.
+- **Split boards**: the master mirrors all lighting data and indicator state to the slave half, since VIA only talks to the master and QMK doesn't sync Caps Word. The module turns on `SPLIT_LAYER_STATE_ENABLE` so the slave follows the active layer, and `SPLIT_ACTIVITY_ENABLE` so it sleeps with the master's key activity.
+- **Defaults**: the base layer starts red at full brightness; every other layer and indicator starts transparent; the sleep timer starts at the keymap's `RGB_MATRIX_TIMEOUT` (off if unset). These defaults are restored after `EE_CLR` or a storage version change.
 - **Caps Word**: the module enables `CAPS_WORD_ENABLE` so the Caps Word indicator works. Assign `CW_TOGG` in VIA.
 - **Boards without RGB matrix**: the module builds to nothing (apart from Caps Word), so a VIA keymap shared with an RGB light revision still builds.
 
@@ -61,7 +62,7 @@ The module reports `VIA_FIRMWARE_VERSION 2`, and the generated definition only s
 | --- | --- |
 | 0 (without the module) | stock lighting controls |
 | 1 | per-key colors and underglow color |
-| 2 | lighting layers, brightness, indicators and Status Indicators |
+| 2 | lighting layers, brightness, indicators, Status Indicators and RGB sleep timer |
 
 So the updated definition can ship before customers update their firmware. Boards that set their own `VIA_FIRMWARE_VERSION` must keep it at 2 or higher.
 
@@ -69,7 +70,7 @@ VIA reads every LED's color on connect when keys carry LED tags. keebio/via-app 
 
 ## Storage
 
-`(VIA_PER_KEY_LAYERS + 4) × (3 bytes per LED + 1 bit per LED)`: about 1.7 KB for 4 layers on a 68-LED board, 280 bytes on BDN9.
+`(VIA_PER_KEY_LAYERS + 4) × (3 bytes per LED + 1 bit per LED) + 4 bytes`: about 1.7 KB for 4 layers on a 68-LED board, 280 bytes on BDN9.
 
 - **RP2040**: 4 KB of emulated EEPROM by default; fits.
 - **STM32**: 1 KB by default. Raise it in the keymap's `config.h`, e.g. `#define WEAR_LEVELING_BACKING_SIZE 6144` (3 KB of EEPROM) as Iris LM does. Wear leveling keeps a RAM copy of the whole EEPROM, so check the build still links; the G431 tops out around 3 KB. Otherwise use fewer layers (`VIA_PER_KEY_LAYERS`).
@@ -97,9 +98,14 @@ All on VIA custom channel 0 (`id_custom_set_value` 0x07 / `id_custom_get_value` 
 | 4 | `overlay, led, count, (hue, sat, val, transparent)…` | Any lighting layer or indicator overlay (overlay = layer, or `VIA_PER_KEY_LAYERS` + indicator) |
 | 5 | get: `layers, indicators, led count` | |
 | 6 | get `led, count` → LED flags | Lets the app find underglow LEDs |
+| 7 | `minutes` | RGB sleep timer dropdown: 0 (never), 5, 10, 15, 30, 60 or 120. Get returns 255 (Custom) for any other value; setting 255 changes nothing |
+| 8 | `minutes_hi, minutes_lo` | RGB sleep timer, 1–1440 minutes (the Custom slider; 16-bit big-endian, as VIA sends ranges above 255). Stored in ms; get rounds up to whole minutes |
+
+Setting the sleep timer (ID 7 or 8) restarts its countdown and wakes the lighting, as a key press would.
 
 `id_custom_save` schedules a debounced save. Packet layouts are documented at the top of `via_per_key_rgb.c`.
 
 ## Notes
 
+- `RGB_MATRIX_TIMEOUT` only sets the default. The module's `post_config.h` redefines it to read the stored value, so QMK's own timeout check uses whatever VIA set.
 - The keyboard must not define `via_custom_value_command_kb`; this module does.

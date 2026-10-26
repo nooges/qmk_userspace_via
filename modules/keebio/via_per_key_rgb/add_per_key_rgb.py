@@ -41,8 +41,14 @@ NO_COLOR_EFFECTS = [24, 28, 29, 32]  # same exclusions VIA's built-in menu uses
 
 # VIA_FIRMWARE_VERSION set by the module's config.h; older firmware gets the stock controls
 PER_KEY_FIRMWARE_VERSION = 1
-# Firmware with lighting layers and indicator overlays (value ID 5)
+# Firmware with lighting layers, indicator overlays (value ID 5) and the RGB sleep timer (value IDs 7-8)
 INDICATOR_FIRMWARE_VERSION = 2
+
+# RGB sleep timer presets in minutes; must match pkr_sleep_presets in via_per_key_rgb.c
+SLEEP_PRESETS = [5, 10, 15, 30, 60, 120]
+SLEEP_CUSTOM = 255  # firmware reports this for values that aren't presets
+SLEEP_MAX = 1440  # 24 h; must match PKR_SLEEP_MAX. Above 255, VIA sends 16-bit values
+SLEEP_CONTROL_ID = "id_via_per_key_sleep_timer"
 
 # The painter in indicators-only mode, for effects other than Direct.
 # keebio/via-app keys off this ID; value ID 5 (overlay counts) is a harmless read.
@@ -76,7 +82,8 @@ def build_menu(direct_id, has_underglow):
     options.append(["Direct (Per-Key)", direct_id])
 
     e = "{id_qmk_rgb_matrix_effect}"
-    per_key = effect_controls(options, NO_COLOR_EFFECTS + [direct_id], [direct_id])
+    effects = effect_controls(options, NO_COLOR_EFFECTS + [direct_id], [direct_id])
+    per_key = []
     per_key.append({"showIf": f"{e} == {direct_id}", "label": "Per-Key Colors",
                     "type": "color-palette", "content": ["id_qmk_rgb_matrix_color", 3, 4]})
     if has_underglow:
@@ -96,8 +103,20 @@ def build_menu(direct_id, has_underglow):
                  "content": ["id_qmk_rgb_matrix_brightness", 3, 1]},
                 {"showIf": f"{fw} < {PER_KEY_FIRMWARE_VERSION}",
                  "content": effect_controls(stock, NO_COLOR_EFFECTS, [])},
+                {"showIf": f"{fw} >= {PER_KEY_FIRMWARE_VERSION}", "content": effects},
+                # Groups can't nest, so the sleep timer splits the per-key group to
+                # sit between the effect controls and the painters
+                {"showIf": f"{fw} >= {INDICATOR_FIRMWARE_VERSION}", "content": [
+                    # Minutes; the firmware converts to and from RGB_MATRIX_TIMEOUT's ms
+                    {"label": "RGB Sleep Timer", "type": "dropdown",
+                     "options": [["Never", 0]] + [[f"{m} mins", m] for m in SLEEP_PRESETS]
+                                + [["Custom", SLEEP_CUSTOM]],
+                     "content": [SLEEP_CONTROL_ID, 0, 7]},
+                    {"showIf": f"{{{SLEEP_CONTROL_ID}}} == {SLEEP_CUSTOM}", "label": "Custom Sleep Timer (mins)",
+                     "type": "range", "options": [1, SLEEP_MAX],
+                     "content": ["id_via_per_key_sleep_timer_custom", 0, 8]},
+                ]},
                 {"showIf": f"{fw} >= {PER_KEY_FIRMWARE_VERSION}", "content": per_key},
-                # Groups can't nest, so this sits beside the per-key group
                 {"showIf": f"{fw} >= {INDICATOR_FIRMWARE_VERSION}", "content": [
                     {"showIf": f"{e} != {direct_id}", "label": "Status Indicators",
                      "type": "color-palette", "content": [INDICATOR_CONTROL_ID, 0, 5]},
