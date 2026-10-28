@@ -85,6 +85,7 @@ Adding the module, or changing the storage layout, moves VIA's dynamic keymap in
 | `VIA_PER_KEY_EFFECT_ID` | 45 | Direct's effect ID; must match the definition's `--direct-id` |
 | `VIA_PER_KEY_LAYERS` | 4 | Lighting layers (keymap layers 0 to N-1) |
 | `VIA_PER_KEY_SAVE_DELAY_MS` | 1500 | Delay before saving after the last change |
+| `VIA_PER_KEY_RGB_DISABLE` | undefined | Builds the module to nothing (apart from Caps Word) on an RGB matrix revision that shares the VIA keymap but shouldn't get per-key lighting; guard it with `KEYBOARD_<board>_<rev>` |
 
 ## Protocol
 

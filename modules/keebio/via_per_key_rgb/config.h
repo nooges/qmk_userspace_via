@@ -2,8 +2,9 @@
 #pragma once
 
 // Boards without RGB matrix (e.g. an RGB light revision sharing the VIA keymap)
-// build without the module's storage and sync
-#ifdef RGB_MATRIX_ENABLE
+// build without the module's storage and sync. A revision with RGB matrix that
+// shares the keymap can opt out with VIA_PER_KEY_RGB_DISABLE in the keymap's config.h.
+#if defined(RGB_MATRIX_ENABLE) && !defined(VIA_PER_KEY_RGB_DISABLE)
 
 // Lighting layers: layer 0 is the base paint, higher layers overlay it while active
 #ifndef VIA_PER_KEY_LAYERS
@@ -38,4 +39,4 @@
 #    define VIA_FIRMWARE_VERSION 2
 #endif
 
-#endif // RGB_MATRIX_ENABLE
+#endif // RGB_MATRIX_ENABLE && !VIA_PER_KEY_RGB_DISABLE

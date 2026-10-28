@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+#ifndef VIA_PER_KEY_RGB_DISABLE
 // Becomes RGB_MATRIX_COMMUNITY_MODULE_PER_KEY_VIA in enum rgb_matrix_effects
 RGB_MATRIX_EFFECT(PER_KEY_VIA)
 
@@ -22,3 +23,4 @@ static bool PER_KEY_VIA(effect_params_t *params) {
     return rgb_matrix_check_finished_leds(led_max);
 }
 #endif
+#endif // VIA_PER_KEY_RGB_DISABLE

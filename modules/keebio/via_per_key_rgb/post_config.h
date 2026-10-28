@@ -2,7 +2,7 @@
 #pragma once
 
 // Included after the keyboard and keymap config.h, so RGB_MATRIX_TIMEOUT is final here
-#if defined(RGB_MATRIX_ENABLE) && !defined(__ASSEMBLER__)
+#if defined(RGB_MATRIX_ENABLE) && !defined(VIA_PER_KEY_RGB_DISABLE) && !defined(__ASSEMBLER__)
 #    include <stdint.h>
 
 // RGB_MATRIX_TIMEOUT becomes the default for the RGB sleep timer VIA can change. An enum
