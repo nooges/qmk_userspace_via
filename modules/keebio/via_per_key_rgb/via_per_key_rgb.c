@@ -224,16 +224,31 @@ static void pkr_write(void) {
     eeconfig_update_via_per_key_rgb_datablock(&pkr_timeout_ms, sizeof(pkr_hs) + sizeof(pkr_v) + sizeof(pkr_transparent), sizeof(pkr_timeout_ms));
 }
 
-// Fresh/cleared EEPROM: base layer red at full brightness, every overlay transparent,
-// timeout from RGB_MATRIX_TIMEOUT
+#ifdef VIA_PER_KEY_DEFAULTS
+// Keymap-provided defaults: {hue, sat, val, transparent} per LED for every lighting
+// layer, then every indicator overlay, as in a via-app lighting export's perKey.overlays
+extern const uint8_t VIA_PER_KEY_DEFAULTS[PKR_OVERLAYS][RGB_MATRIX_LED_COUNT][4];
+#endif
+
+// Fresh/cleared EEPROM: the keymap's VIA_PER_KEY_DEFAULTS if set, otherwise base layer
+// red at full brightness and every overlay transparent; timeout from RGB_MATRIX_TIMEOUT
 void eeconfig_init_via_per_key_rgb_datablock(void) {
     for (uint8_t layer = 0; layer < PKR_OVERLAYS; layer++) {
+#ifdef VIA_PER_KEY_DEFAULTS
+        for (uint8_t i = 0; i < RGB_MATRIX_LED_COUNT; i++) {
+            pkr_hs[layer][i][0] = VIA_PER_KEY_DEFAULTS[layer][i][0];
+            pkr_hs[layer][i][1] = VIA_PER_KEY_DEFAULTS[layer][i][1];
+            pkr_v[layer][i]     = VIA_PER_KEY_DEFAULTS[layer][i][2];
+            pkr_set_transparent(layer, i, VIA_PER_KEY_DEFAULTS[layer][i][3]);
+        }
+#else
         for (uint8_t i = 0; i < RGB_MATRIX_LED_COUNT; i++) {
             pkr_hs[layer][i][0] = 0;   // hue: red
             pkr_hs[layer][i][1] = 255; // sat
             pkr_v[layer][i]     = 255;
         }
         memset(pkr_transparent[layer], layer > 0 ? 0xFF : 0, PKR_MASK_BYTES);
+#endif
         pkr_mark_dirty(layer, 0, RGB_MATRIX_LED_COUNT);
     }
     pkr_timeout_ms = (uint32_t)VIA_PER_KEY_TIMEOUT_DEFAULT_S * 1000;

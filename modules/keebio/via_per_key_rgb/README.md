@@ -19,7 +19,7 @@ Also:
 
 - **Persistence**: everything is saved to the module's own EEPROM datablock. Saves are debounced (1.5 s after the last change) so painting doesn't wear out emulated EEPROM.
 - **Split boards**: the master mirrors all lighting data and indicator state to the slave half, since VIA only talks to the master and QMK doesn't sync Caps Word. The module turns on `SPLIT_LAYER_STATE_ENABLE` so the slave follows the active layer, and `SPLIT_ACTIVITY_ENABLE` so it sleeps with the master's key activity.
-- **Defaults**: the base layer starts red at full brightness; every other layer and indicator starts transparent; the sleep timer starts at the keymap's `RGB_MATRIX_TIMEOUT` (off if unset). These defaults are restored after `EE_CLR` or a storage version change.
+- **Defaults**: the base layer starts red at full brightness; every other layer and indicator starts transparent; the sleep timer starts at the keymap's `RGB_MATRIX_TIMEOUT` (off if unset). A keymap can bake in its own lighting with `VIA_PER_KEY_DEFAULTS` (see [Configuration](#configuration)). These defaults are restored after `EE_CLR` or a storage version change.
 - **Caps Word**: the module enables `CAPS_WORD_ENABLE` so the Caps Word indicator works. Assign `CW_TOGG` in VIA.
 - **Boards without RGB matrix**: the module builds to nothing (apart from Caps Word), so a VIA keymap shared with an RGB light revision still builds.
 
@@ -85,6 +85,7 @@ Adding the module, or changing the storage layout, moves VIA's dynamic keymap in
 | `VIA_PER_KEY_EFFECT_ID` | 45 | Direct's effect ID; must match the definition's `--direct-id` |
 | `VIA_PER_KEY_LAYERS` | 4 | Lighting layers (keymap layers 0 to N-1) |
 | `VIA_PER_KEY_SAVE_DELAY_MS` | 1500 | Delay before saving after the last change |
+| `VIA_PER_KEY_DEFAULTS` | undefined | Name of a keymap array `const uint8_t name[VIA_PER_KEY_LAYERS + 4][RGB_MATRIX_LED_COUNT][4]` of `{hue, sat, val, transparent}` per LED, for each lighting layer then each indicator overlay (the `perKey.overlays` of a via-app `.lighting.json` export); used in place of the stock defaults |
 | `VIA_PER_KEY_RGB_DISABLE` | undefined | Builds the module to nothing (apart from Caps Word) on an RGB matrix revision that shares the VIA keymap but shouldn't get per-key lighting; guard it with `KEYBOARD_<board>_<rev>` |
 
 ## Protocol
